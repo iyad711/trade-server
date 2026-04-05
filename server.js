@@ -1,35 +1,24 @@
-// كود السيرفر المركزي - Node.js
 const express = require('express');
 const app = express();
-app.use(express.json()); // للسماح بقراءة بيانات الصفقات القادمة من ميتاتريدر
+app.use(express.json());
 
-let currentTrade = null; // متغير لتخزين أحدث صفقة مستلمة من الماستر
+let lastTrade = {}; // تخزين آخر صفقة
 
-// 1. رابط استقبال الصفقة من الماستر (المتداول الرئيسي)
-app.post('/publish', (req, res) => {
-    currentTrade = req.body; 
-    console.log("------------------------------------");
-    console.log("تم استقبال صفقة جديدة من الماستر:");
-    console.log("الرمز:", currentTrade.symbol);
-    console.log("النوع:", currentTrade.type == 0 ? "شراء (Buy)" : "بيع (Sell)");
-    console.log("الحجم:", currentTrade.vol);
-    console.log("------------------------------------");
-    
-    res.status(200).send({ status: "Trade Received by Server" });
+// الباب الخاص بالماستر للإرسال
+app.post('/trade', (req, res) => {
+    lastTrade = req.body;
+    console.log("استلمت صفقة من الماستر:", lastTrade);
+    res.status(200).send("OK");
 });
 
-// 2. رابط إرسال الصفقة للتابعين (الذين ينسخون)
+// الباب الخاص بالسلف للاستلام
 app.get('/copy', (req, res) => {
-    if (currentTrade) {
-        res.json(currentTrade);
+    if (Object.keys(lastTrade).length === 0) {
+        res.status(200).json({ message: "No trades available" });
     } else {
-        res.status(404).send({ message: "No trades available" });
+        res.status(200).json(lastTrade);
     }
 });
 
-// تشغيل السيرفر على المنفذ 3000
-const PORT = 3000;
-app.listen(PORT, () => {
-    console.log(`نظام النسخ يعمل الآن بنجاح على المنفذ: ${PORT}`);
-    console.log("انتظار الصفقات من منصة الماستر...");
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
