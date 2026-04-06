@@ -4,63 +4,77 @@ const app = express();
 app.use(express.json());
 
 let lastTrade = {}; 
-// --- أضف أرقام الـ ID الخاصة بالمشتركين هنا ---
-let subscribers = ["7308459367"]; 
-// مخزن لحفظ الـ message_id لعمل Reply لكل مستخدم
+// استخدام Set لضمان عدم تكرار المشتركين
+let subscribers = new Set(["7308459367"]); 
 let msgHistory = {}; 
 
-// 1. استقبال البيانات من MT5 وتوزيعها
+const BOT_TOKEN = "8601737426:AAHZPEJTRu01qteY7dp24mwpN9A4zFLeMUY";
+
+// --- 1. ميزة استقبال المشتركين الجدد تلقائياً ---
+// يجب ضبط Webhook للبوت على هذا المسار لاحقاً أو استخدامه لاستقبال الرسائل
+app.post('/webhook', (req, res) => {
+    if (req.body.message) {
+        const chatId = req.body.message.chat.id.toString();
+        if (!subscribers.has(chatId)) {
+            subscribers.add(chatId);
+            console.log(`👤 مشترك جديد انضم: ${chatId}`);
+            // إرسال رسالة ترحيب
+            axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                chat_id: chatId,
+                text: "✅ تم تفعيل اشتراكك في بوت هيروشيما 711 بنجاح! ستصلك التوصيات هنا فوراً."
+            }).catch(e => console.log("Error sending welcome"));
+        }
+    }
+    res.sendStatus(200);
+});
+
+// --- 2. استقبال الصفقات من MT5 وتوزيعها للجميع ---
 app.post('/trade', async (req, res) => {
     lastTrade = req.body;
     lastTrade.server_time = new Date().toLocaleString();
     
-    console.log("✅ استلمت بيانات:", lastTrade.action, "Ticket:", lastTrade.ticket);
+    console.log(`📢 توزيع صفقة: ${lastTrade.action} لـ ${subscribers.size} مشترك.`);
 
-    const token = lastTrade.token || "8601737426:AAHZPEJTRu01qteY7dp24mwpN9A4zFLeMUY";
-
-    // إرسال التليجرام لجميع المشتركين
     if (lastTrade.msg) {
-        for (let chatId of subscribers) {
+        // تحويل الـ Set إلى مصفوفة للإرسال
+        const currentSubscribers = Array.from(subscribers);
+        
+        for (let chatId of currentSubscribers) {
             try {
-                let url = `https://api.telegram.org/bot${token}/sendMessage`;
                 let payload = {
                     chat_id: chatId,
                     text: lastTrade.msg,
                     parse_mode: "Markdown"
                 };
 
-                // ميزة الرد الذكي (Reply)
+                // ميزة الرد الذكي لكل مشترك
                 if (lastTrade.action !== "ORDER_OPEN" && msgHistory[lastTrade.ticket] && msgHistory[lastTrade.ticket][chatId]) {
                     payload.reply_to_message_id = msgHistory[lastTrade.ticket][chatId];
                 }
 
-                const response = await axios.post(url, payload);
+                const response = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, payload);
 
-                // حفظ ID الرسالة الأولى للرد عليها لاحقاً
+                // حفظ رقم الرسالة للدخول فقط
                 if (lastTrade.action === "ORDER_OPEN") {
                     if (!msgHistory[lastTrade.ticket]) msgHistory[lastTrade.ticket] = {};
                     msgHistory[lastTrade.ticket][chatId] = response.data.result.message_id;
                 }
             } catch (err) {
-                console.error(`❌ فشل الإرسال لـ ${chatId}:`, err.message);
+                console.error(`❌ فشل الإرسال للمشترك ${chatId}:`, err.message);
             }
         }
     }
 
-    res.status(200).json({ status: "Success", broadcasted: subscribers.length });
+    res.status(200).json({ status: "Success", sent_to: subscribers.size });
 });
 
-// 2. نقطة النسخ (للسلف) - بقيت كما هي لضمان عمل النسخ
+// --- 3. مسار النسخ للسلف (Slave) ---
 app.get('/copy', (req, res) => {
-    if (Object.keys(lastTrade).length === 0) {
-        res.send("<h1>🛰️ السيرفر يعمل</h1><p>بانتظار أول صفقة...</p>");
-    } else {
-        res.json(lastTrade); 
-    }
+    res.json(lastTrade);
 });
 
 app.get('/', (req, res) => {
-    res.send("<h1>🚀 Hiroshima Multi-User Server is Online</h1>");
+    res.send(`<h1>🚀 Hiroshima Server is Active</h1><p>Subscribers: ${subscribers.size}</p>`);
 });
 
 const PORT = process.env.PORT || 3000;
